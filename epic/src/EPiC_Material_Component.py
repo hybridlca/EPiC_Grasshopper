@@ -46,6 +46,7 @@ Select a material from the EPiC Database
         GHG_Reduction_Factor_(%): Reduce the value of the GHG emissions coefficient by a percentage
         0(%) indicates no change, 50(%) half of the value, and 100(%) reduces the GHG emissions coefficient to zero
         ***Optional***
+
         Comments: Comments about the material - these will appear in the printed/exported reports.
         ***Optional***
 

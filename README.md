@@ -8,6 +8,7 @@
 *Funded by the [Université Catholique de Louvain](https://www.uclouvain.be), Belgium*
 
 *How to cite in scientific articles*
+
 Stephan, A., Prideaux, F., & Crawford, R. H. (2024). EPiC grasshopper: A bottom-up parametric tool to quantify life cycle embodied environmental flows of buildings and infrastructure assets. Building and Environment, 248, 111077. doi: [https://doi.org/10.1016/j.buildenv.2023.111077](https://doi.org/10.1016/j.buildenv.2023.111077)
 
 

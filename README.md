@@ -7,6 +7,10 @@
 
 *Funded by the [Université Catholique de Louvain](https://www.uclouvain.be), Belgium*
 
+*How to cite in scientific articles*
+Stephan, A., Prideaux, F., & Crawford, R. H. (2024). EPiC grasshopper: A bottom-up parametric tool to quantify life cycle embodied environmental flows of buildings and infrastructure assets. Building and Environment, 248, 111077. doi: [https://doi.org/10.1016/j.buildenv.2023.111077](https://doi.org/10.1016/j.buildenv.2023.111077)
+
+
 ## About:
 EPiC Grasshopper is a plug-in for Grasshopper (Rhinoceros3D) used to quantify
 life cycle embodied energy, greenhouse emissions and water for buildings and other built assets. It enables designers, 

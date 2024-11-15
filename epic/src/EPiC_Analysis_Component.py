@@ -113,6 +113,7 @@ import Grasshopper.Kernel.Data as ghp
 from Rhino import RhinoApp
 from ghpythonlib.componentbase import executingcomponent as component
 import ghpythonlib.treehelpers as th
+from scriptcontext import sticky as st
 
 import epic
 
@@ -122,19 +123,29 @@ no_inputs_warning = "No assemblies nor built assets linked, please input assembl
 
 
 class EPiCAnalysisComponent(component):
-    def RunScript(self, report_name, epic_inputs, period_of_analysis, _null, analysis_button,
-                  analysis_type, graph_origin, graph_scale, _null2, folder_location, button):
+    def RunScript(self,
+                  report_name,
+                  epic_inputs,
+                  period_of_analysis,
+                  _null,
+                  analysis_button,
+                  analysis_type,
+                  graph_origin,
+                  graph_scale,
+                  _null2,
+                  folder_location,
+                  button):
 
         # Component and version information
         __author__ = epic.__author__
-        __version__ = "1.01"
+        __version__ = "1.02"
         if __version__ == epic.__version__:
-            self.Message = epic.__message__
+            ghenv.Component.Message = epic.__message__
         else:
-            self.Message = epic.version_mismatch(__version__)
-            self.AddRuntimeMessage(RML.Remark, self.Message)
-        self.Name = "EPiC Analysis"
-        self.NickName = "EPiC Analysis"
+            ghenv.Component.Message = epic.version_mismatch(__version__)
+            ghenv.Component.AddRuntimeMessage(RML.Remark, ghenv.Component.Message)
+        ghenv.Component.Name = "EPiC Analysis"
+        ghenv.Component.NickName = "EPiC Analysis"
 
         # Convert inputs to flat list
         epic_inputs.Flatten(ghp.GH_Path(0))
@@ -170,8 +181,18 @@ class EPiCAnalysisComponent(component):
                                                                           period_of_analysis=period_of_analysis,
                                                                           report_name=report_name,
                                                                           epic_assemblies_name=epic_assemblies_name)
+
+            # Stop report from printing whenever component is updated (if toggle is connected).
+            if 'report_exporting' not in st:
+                st['report_exporting'] = True
+
+            # Button / toggle must return to 'False' before a new report is printed
+            elif not button:
+                st['report_exporting'] = False
+
             # Create CSV report when button is pressed
-            if button and folder_location:
+            if button and folder_location and not st['report_exporting']:
+                st['report_exporting'] = True
                 message = epic.print_csv(report_name, folder_location, period_of_analysis, epic_analysis, epic_inputs)
                 RhinoApp.WriteLine(message)
 
@@ -181,4 +202,5 @@ class EPiCAnalysisComponent(component):
             # Generate component outputs depending on the analysis_type
             return epic_analysis.generate_analysis_breakdown_for_outputs(analysis_type=analysis_type)
         else:
-            self.AddRuntimeMessage(RML.Warning, "Input EPiCAssembly or EPiCBuiltAsset items for built_assets")
+            ghenv.Component.AddRuntimeMessage(RML.Warning,
+                                              "Input EPiCAssembly or EPiCBuiltAsset items for built_assets")

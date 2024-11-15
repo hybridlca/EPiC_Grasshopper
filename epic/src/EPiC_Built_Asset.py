@@ -18,6 +18,9 @@ Creates a built asset object using multiple EPiC_Assembly items
         Asset_Name: Name for the Built Asset
         ***Optional***
 
+        Asset_Comments: Comments for the Built Asset
+        ***Optional***
+
         EPiC_Assemblies: In input one or more EPiC_Assembly objects
         (**REQUIRED)
 
@@ -39,30 +42,28 @@ epic = reload(epic)
 
 
 class MyComponent(component):
-    def RunScript(self, input_name, input_comments, null, epic_assemblies):
-
+    def RunScript(self, input_name, input_comments, _null, epic_assemblies):
         # Component and version information
         __author__ = epic.__author__
-        __version__ = "1.01"
+        __version__ = "1.02"
         if __version__ == epic.__version__:
-            self.Message = epic.__message__
+            ghenv.Component.Message = epic.__message__
         else:
-            self.Message = epic.version_mismatch(__version__)
-            self.AddRuntimeMessage(RML.Remark, self.Message)
-        self.Name = "EPiC Built Asset"
-        self.NickName = "EPiC Built Asset"
+            ghenv.Component.Message = epic.version_mismatch(__version__)
+            ghenv.Component.AddRuntimeMessage(RML.Remark, ghenv.Component.Message)
+        ghenv.Component.Name = "EPiC Built Asset"
+        ghenv.Component.NickName = "EPiC Built Asset"
 
         if epic_assemblies:
-
             # Convert inputs to flat list
             epic_assemblies.Flatten(ghp.GH_Path(0))
             epic_assemblies = th.tree_to_list(epic_assemblies)
 
             # Provide a default name if none provided
-            input_name = 'EPiC Built Asset' if not input_name else input_name[0]
-
+            input_name = 'EPiC Built Asset' if not input_name else input_name
             # Generate an EPiCBuiltAsset class object
             built_asset = epic.EPiCBuiltAsset(input_name, epic_assemblies, comments=input_comments)
-            return [built_asset, None, built_asset.fetch_geometry_as_list()]
+            return built_asset, None, built_asset.fetch_geometry_as_list()
         else:
-            self.AddRuntimeMessage(RML.Warning, "No input detected, please provide one/multiple EPiC_Assembly objects")
+            ghenv.Component.AddRuntimeMessage(RML.Warning,
+                                              "No input detected, please provide one/multiple EPiC_Assembly objects")

@@ -5,9 +5,8 @@ import datetime
 import os.path
 from collections import OrderedDict
 from math import sqrt, floor, ceil, log10, isnan
-
+from scriptcontext import sticky as st
 import Grasshopper.Kernel as ghKernel
-import Grasshopper.GUI as GUI
 import cPickle
 import ghpythonlib.components as ghcomponents
 import rhinoscriptsyntax as rs
@@ -18,12 +17,13 @@ from System import Drawing
 from System import Guid
 from System.Drawing import Color
 import os
+import random
 
 __author__ = "André Stephan & Fabian Prideaux"
-__version__ = "1.01"
-__date__ = 'May 29, 2023'
+__version__ = "1.02"
+__date__ = 'May, 2024'
 __message__ = 'EPiC Plugin ' + __version__ + '\n' + __date__
-epic_version = 'AU2023'
+epic_version = 'AU2024'
 EPIC_DATABASE_WEBSITE = 'http://www.msd.unimelb.edu.au/epic'
 REPORT_A_BUG = 'https://bit.ly/EPiCGrasshopperBugs'
 DISCLAIMER = """ 
@@ -78,7 +78,34 @@ EPIC_CATEGORIES = [
     "6: Sand, stone and ceramics",
     "7: Timber products"]
 
-PICKLE_DB = "EPiC_Database_2023.pkl"
+PICKLE_DB = "EPiC_Database_2024.pkl"
+
+
+def remove_commas_and_flatten_list_for_csv_export(text_inputs, list_separator=' | ',
+                                                  remove_spaces=False, limit_characters=False):
+    """
+    Remove any commas from text provided. Flatten if provided as a list of multiple strings.
+    :param text_inputs: a string, or list of strings
+    :param list_separator: separator (string) to use if a list is provided
+    :param remove_spaces: change spaces to underscores
+    :param limit_characters: limit string to 50 characters
+    :return: string
+    """
+    if isinstance(text_inputs, list):
+        flat_text = list_separator.join(text_inputs).replace(",", " ")
+    elif isinstance(text_inputs, str):
+        flat_text = text_inputs.replace(",", " ")
+    else:
+        return text_inputs
+
+    if remove_spaces:
+        flat_text = flat_text.replace(' ', '_')
+
+    if limit_characters:
+        flat_text = flat_text[:50]
+
+    return flat_text
+
 
 def version_mismatch(component_version):
     """
@@ -86,7 +113,7 @@ def version_mismatch(component_version):
     :param component_version: Grasshopper component version
     :return: Error message as string
     """
-    error = '*** WARNING COMPONENT IS OUTDATED, PLEASE UPDATE YOUR USER OBJECTS ***\n' \
+    error = '*** WARNING VERSION MISMATCH, PLEASE UPDATE YOUR USER OBJECTS ***\n' \
             'DOWNLOAD NEW USER OBJECTS AND COPY + PASTE THE NEW CODE INTO THIS COMPONENT\n' \
             'EPiC Plugin version: {}\n' \
             'Component version: {}'.format(__version__, component_version)
@@ -132,7 +159,7 @@ def make_value_list_input_component(input_node, valuelist_values, ghenv, nicknam
     :return: new valuelist Instance Guid
     """
     # Ensure that the component expires, so that values load correctly
-    ghenv.Component.ExpireSolution(True)
+    # ghenv.Component.ExpireSolution(True)
 
     # Check if component already has input
     if ghenv.Component.Params.Input[input_node].SourceCount == 0:
@@ -150,6 +177,7 @@ def make_value_list_input_component(input_node, valuelist_values, ghenv, nicknam
 
         if not xloc:
             xloc = max([len(x) for x in valuelist_values]) * -5 - 100
+
         # If no valuelist_names, or the list size is different, then use the values as a default
         if not valuelist_names or len(valuelist_names) != len(valuelist_values):
             valuelist_names = valuelist_values
@@ -158,9 +186,6 @@ def make_value_list_input_component(input_node, valuelist_values, ghenv, nicknam
         for num, vals in enumerate(valuelist_values):
             new_component.ListItems.Add(ghKernel.Special.GH_ValueListItem(str(valuelist_names[num]), '"'
                                                                           + str(valuelist_values[num]) + '"'))
-
-        # TODO: Fix location of valuelist for materials
-        #  Customise valuelist location
 
         new_component.Attributes.Pivot = Drawing.PointF(ghenv.Component.Params.Input[input_node].Attributes.Bounds.X
                                                         + xloc - new_component.Attributes.Bounds.Width,
@@ -173,6 +198,13 @@ def make_value_list_input_component(input_node, valuelist_values, ghenv, nicknam
 
         # Connect valuelist to component
         ghenv.Component.Params.Input[input_node].AddSource(new_component)
+        ghenv.Component.Params.OnParametersChanged()
+
+        def expire_solution():
+            ghenv.Component.ExpireSolution(False)
+
+        ghdoc.ScheduleSolution(5, expire_solution())
+
         return str(new_component.InstanceGuid)
 
 
@@ -280,11 +312,10 @@ def print_csv(report_name, folder_location, period_of_analysis, analysis, epic_a
     :param epic_assemblies: EPiCAssembly objects that are used for the csv report
     """
 
-    # TODO automatically generate directory for outputs and check directory input value.
-
     message = "FAILED TO WRITE CSV. Folder location:" + folder_location
-    if not report_name:
-        report_name = "EPiC Analysis"
+    report_name = remove_commas_and_flatten_list_for_csv_export(report_name, list_separator='_',
+                                                                remove_spaces=True) \
+        if report_name else 'EPiC Assembly'
     if not folder_location:
         raise ValueError('No folder location provided')
 
@@ -461,33 +492,33 @@ def _write_assembly_flows_to_csv(assemblies, csv):
                                                           '', '', '', (mat['quantity'] * assembly.total_units),
                                                           mat['material_object'].functional_unit,
                                                           mat['material_object'].comments))
-            csv.write('{},{},{},{},{}\n'.format('>> Initial (excl. wastage)', mat['initial']['energy']
-                                                - mat['initial_wastage']['energy'], mat['initial']['water']
-                                                - mat['initial_wastage']['water'], mat['initial']['ghg']
-                                                - mat['initial_wastage']['ghg'], ''))
+                csv.write('{},{},{},{},{}\n'.format('>> Initial (excl. wastage)', mat['initial']['energy']
+                                                    - mat['initial_wastage']['energy'], mat['initial']['water']
+                                                    - mat['initial_wastage']['water'], mat['initial']['ghg']
+                                                    - mat['initial_wastage']['ghg'], ''))
 
-            if mat['initial_wastage']['energy'] > 0:
-                csv.write('{},{},{},{},{}\n'.format('>>>> Initial Wastage (' + str(
-                    (mat['initial_wastage']['energy'] * 100) / mat['initial']['energy']) + '%)',
-                                                    mat['initial_wastage']['energy'],
-                                                    mat['initial_wastage']['water'],
-                                                    mat['initial_wastage']['ghg'],
-                                                    ''))
+                if mat['initial_wastage']['energy'] > 0:
+                    csv.write('{},{},{},{},{}\n'.format('>>>> Initial Wastage (' + str(
+                        (mat['initial_wastage']['energy'] * 100) / mat['initial']['energy']) + '%)',
+                                                        mat['initial_wastage']['energy'],
+                                                        mat['initial_wastage']['water'],
+                                                        mat['initial_wastage']['ghg'],
+                                                        ''))
 
-            if (mat['recurrent']['energy']) > 0:
-                csv.write('{},{},{},{},{}\n'.format('>> Recurrent (excl. wastage)',
-                                                    mat['recurrent']['energy']
-                                                    - mat['recurrent_wastage']['energy'],
-                                                    mat['recurrent']['water']
-                                                    - mat['recurrent_wastage']['water'],
-                                                    mat['recurrent']['ghg']
-                                                    - mat['recurrent_wastage']['ghg'], ''))
+                if (mat['recurrent']['energy']) > 0:
+                    csv.write('{},{},{},{},{}\n'.format('>> Recurrent (excl. wastage)',
+                                                        mat['recurrent']['energy']
+                                                        - mat['recurrent_wastage']['energy'],
+                                                        mat['recurrent']['water']
+                                                        - mat['recurrent_wastage']['water'],
+                                                        mat['recurrent']['ghg']
+                                                        - mat['recurrent_wastage']['ghg'], ''))
 
-            if (mat['recurrent_wastage']['energy']) > 0:
-                csv.write('{},{},{},{},{}\n'.format('>>>> Recurrent Wastage',
-                                                    mat['recurrent_wastage']['energy'],
-                                                    mat['recurrent_wastage']['water'],
-                                                    mat['recurrent_wastage']['ghg'], ''))
+                if (mat['recurrent_wastage']['energy']) > 0:
+                    csv.write('{},{},{},{},{}\n'.format('>>>> Recurrent Wastage',
+                                                        mat['recurrent_wastage']['energy'],
+                                                        mat['recurrent_wastage']['water'],
+                                                        mat['recurrent_wastage']['ghg'], ''))
             csv.write('\n')
 
 
@@ -614,7 +645,6 @@ class EPiCVisualisations:
             args.Pipeline.DrawHatch(self.fill, self.fill_colour, Color.Transparent)
 
         # region baking for grasshopper.
-        # TODO: Fix colouring for baked objects
         def BakeGeometry(self, doc, att, id):
             id = Guid.Empty
             if self.m_value is None:
@@ -648,8 +678,6 @@ class EPiCVisualisations:
         :param align_top: If True, then the text will be aligned to the top
         :return: EPiCText class object that can be visualised and baked from grasshopper
         """
-
-        # TODO provide 2 options for text alignment (horizontal-alignment and vertical-alignment).
 
         # Create a base plane for the text
         point = rs.AddPoint(*text_location)
@@ -818,11 +846,8 @@ class EPiCMaterial:
             self.wastage = wastage / 100 if wastage else 0
             self.service_life = service_life
             self.process_shares = process_shares
-
-            if comments:
-                self.comments = comments
-            else:
-                self.comments = ''
+            self.id = random.getrandbits(128)
+            self.comments = remove_commas_and_flatten_list_for_csv_export(comments) if comments else ''
             self.material_id = material_id
 
         except TypeError:
@@ -864,99 +889,117 @@ class EPiCMaterial:
         return breakdown_dict
 
     @staticmethod
-    def generate_material_and_category_dropdown_list(component_object, ghenv, epic_db):
+    def generate_material_and_category_dropdown_list(component_object, ghenv, epic_db,
+                                                     category="Concrete and plaster products"):
         """
         Generate a material and category list for the EPiC_Material grasshopper component
         :param component_object: Component object to modify
         :param ghenv: The current grasshopper environment
         :param epic_db: EPiCDatabase object to query
+        :param category: Default category to be used for initialising the valuelist
         """
 
-        ghenv.Component.ExpireSolution(True)
+        # Check if input[1] has a value list connected, if not, create one
         if component_object.Params.Input[1].SourceCount == 0:
-            # Check if input[1] has a value list connected, if not, create one
             make_value_list_input_component(1, EPIC_CATEGORIES, ghenv, xloc=-230, yloc=0)
 
         # Check if input[2] has a value list connected, if not, create one, but only if input[1] is connected.
         if component_object.Params.Input[1].SourceCount == 1 and component_object.Params.Input[2].SourceCount == 0:
+
+            list_of_mat_values, list_of_mat_names = (zip(*sorted(epic_db.dict_of_categories[category].items())))
+
             # Use the category created above (input[1]) to generate material list. Set the category to concrete.
-            make_value_list_input_component(2, sorted(
-                [EPiCMaterial._concatenate_mat_name_func_unit(mat_name, epic_db.database[mat_name]['Functional Unit'])
-                 for
-                 mat_name in
-                 epic_db.database.keys() if 'Concrete' in
-                 epic_db.database[mat_name]['Category']]), ghenv, xloc=-365, yloc=0)
+            make_value_list_input_component(2, list_of_mat_values, ghenv,
+                                            valuelist_names = list_of_mat_names, xloc=-365, yloc=0)
+            ghenv.Component.OnPingDocument().ScheduleSolution(5, ghenv.Component.ExpireSolution(True))
 
     @staticmethod
     def generate_slider_input(component_object, ghenv, slider_value, input_node, slider_min = 0, slider_max = 100):
         """
         Generate a slider input attached to the current component object
         :param component_object: Component object to modify
-        :param ghenv: The current grasshopper environment
+        :param ghenv: The current grasshopper environment (not used)
         :param slider_value: value to set for the slider
         :param input_node: node number that the slider should be instantiated on
         :param slider_min: minimum value for the slider
         :param slider_max: maximum value for the slider
         """
+
+        # Check if input has a slider connected
         if component_object.Params.Input[input_node].SourceCount == 0:
 
-            # Check if input has a slider connected, if not, create one
-            ghdoc = ghenv.Component.OnPingDocument()
-            num_slider = ghKernel.Special.GH_NumberSlider()
-            num_slider.Slider.Minimum = slider_min
-
-            # Check if the proposed slider value is more than the slider max value. If so, increase the max value.
-            if slider_value > slider_max:
-                num_slider.Slider.Maximum = slider_value
-            else:
-                num_slider.Slider.Maximum = slider_max
-            num_slider.Slider.DecimalPlaces = 0
-            num_slider.CreateAttributes()
-            num_slider.SetSliderValue(slider_value)
-            num_slider.Attributes.Pivot = Drawing.PointF(ghenv.Component.Params.Input[input_node].Attributes.Bounds.X
-                                                   - num_slider.Attributes.Bounds.Width*2,
-                                                   ghenv.Component.Params.Input[input_node].Attributes.Bounds.Y)
-            ghdoc.AddObject(num_slider, False)
+            num_slider = EPiCMaterial.create_slider(component_object, input_node, slider_max, slider_min, slider_value)
 
             # Connect slider to component
-            ghenv.Component.Params.Input[input_node].AddSource(num_slider)
-            ghenv.Component.ExpireSolution(True)
+            component_object.Params.Input[input_node].AddSource(num_slider)
+
+            # Expire the solution outside of current loop to refresh values
+            component_object.OnPingDocument().ScheduleSolution(1, component_object.ExpireSolution(False))
+
             return str(num_slider.InstanceGuid)
         else:
             pass
 
     @staticmethod
-    def recreate_material_list(epic_db, ghObjects, material_category, Params):
+    def create_slider(component_object, input_node, slider_max, slider_min, slider_value):
+        ghdoc = component_object.OnPingDocument()
+        num_slider = ghKernel.Special.GH_NumberSlider()
+        num_slider.Slider.Minimum = slider_min
+        # Check if the proposed slider value is more than the slider max value. If so, increase the max value.
+        if slider_value > slider_max:
+            num_slider.Slider.Maximum = slider_value
+        else:
+            num_slider.Slider.Maximum = slider_max
+        num_slider.Slider.DecimalPlaces = 0
+        num_slider.SetSliderValue(slider_value)
+        num_slider.CreateAttributes()
+        num_slider.Attributes.Pivot = Drawing.PointF(component_object.Params.Input[input_node].Attributes.Bounds.X
+                                                     - num_slider.Attributes.Bounds.Width * 2,
+                                                     component_object.Params.Input[input_node].Attributes.Bounds.Y)
+        ghdoc.AddObject(num_slider, False)
+        return num_slider
+
+    @staticmethod
+    def recreate_material_list(epic_db, ghObject, material_category, component, set_material=None):
         """
         Recreate the material list based on the currently selected material category
         :param epic_db: EPiCDatabase object
-        :param ghObjects: The current Objects in the grasshopper environment
+        :param ghObject: Grasshopper component
         :param material_category: Currently selected material category
         :param Params: The component parameters, this is needed to recreate the input values
+        :pamam set_material: Specify the chosen material for the new list
         """
 
-        # Test if component is attached to an input
-        if len(Params.Input[2].Sources) > 0:
-            # Iterate through the grasshopper document objects and find the component input 2 source Guid
-            for obj in ghObjects:
-                if obj.InstanceGuid == Params.Input[2].Sources[0].InstanceGuid:
+        # Create a sticky that makes sure itemlist won't continuously load
+        if not "is_running" in st.keys():
+            st["is_running"] = False
 
-                    # Clear the current list items
-                    obj.ListItems.Clear()
+        # Check if the sticky is 0 (and therefore the list isn't in the middle of initialising)
+        if st["is_running"] == False:
+            try:
+                # set the running to true at the start of the function, indicating that it is in progress
+                st["is_running"] = True
+                new_list = zip(*sorted(epic_db.dict_of_categories[material_category].items()))
+                ghObject.ListItems.Clear()
+                selected_material = 0
+                list_number = 0
+                for id, name in zip(new_list[0], new_list[1]):
+                    _ = ghObject.ListItems.Add(ghKernel.Special.GH_ValueListItem(str(name), '"' + str(id) + '"'))
+                    if set_material and set_material == id:
+                        selected_material = list_number
+                    list_number += 1
 
-                    # Create a new list, based on the selected category
-                    new_list = sorted(
-                        [EPiCMaterial._concatenate_mat_name_func_unit(mat_name,
-                                                                      epic_db.database[mat_name]['Functional Unit'])
-                         for mat_name in epic_db.database.keys() if
-                         epic_db.database[mat_name]['Category'] in material_category[0]])
+                # Select the chosen material
+                if selected_material:
+                    ghObject.SelectItem(selected_material)
 
-                    # Add these items to the dropdown list
-                    for vals in new_list:
-                        obj.ListItems.Add(ghKernel.Special.GH_ValueListItem(vals, '"' + str(vals) + '"'))
+                # Expire the current solution
+                component.OnPingDocument().ScheduleSolution(5, ghObject.ExpireSolution(True))
+                st["is_running"] = False
+            except:
+                # If the list loading fails, global running value will be reset
+                st["is_running"] = False
 
-                    # Expire the current solution
-                    obj.ExpireSolution(True)
 
     def print_report(self, print_to_str=False, custom_material=False):
         """
@@ -2068,16 +2111,16 @@ class EPiCAssembly:
         :param service_life: the service_life of the assembly, overriding the service_span of all nested materials (int)
         :param wastage: wastage coefficient of the assembly in %, overriding the wastage coeffs of nested mats (float)
         :param comments: a custom comment (str)
-        :param epic_materials: a list of tuples, item 0 being the quantity of material and item 1 the epic mat instance
+        :param epic_materials: a list of tuples, item 0 the epic mat instance and item 1 being the quantity of material
         :param assembly_units: the functional unit of the assembly (str), e.g. m²
         :param category: the assembly category, used in graph comparisons e.g. Interior Walls, Exterior Walls
         """
 
         self.output_geometry = []
         self.component_type = 'EPiCAssembly'
-        self.name = "EPiC Assembly" if not name else name
-        self.category = self.name if not category else category
-        self.comments = comments if comments else ''
+        self.name = remove_commas_and_flatten_list_for_csv_export(name) if name else 'EPiC Assembly'
+        self.category = self.name if not category else remove_commas_and_flatten_list_for_csv_export(category)
+        self.comments = remove_commas_and_flatten_list_for_csv_export(comments) if comments else ''
         self.service_life = abs(service_life) if service_life else None
         self.assembly_units = assembly_units
 
@@ -2278,26 +2321,20 @@ class EPiCAssembly:
 
         # calculate the same by material
         result['by_material'] = {}
-        for mat_number, material in enumerate(self.epic_materials):
-
-            if material[0].name not in result['by_material']:
-                result['by_material'][material[0].name] = self._fill_flows_dict(period_of_analysis,
-                                                                                materials_list=[material])
-                result['by_material'][material[0].name]['quantity'] = material[1]
-                result['by_material'][material[0].name]['material_object'] = material[0]
-                result['by_material'][material[0].name]['material_name'] = material[0].name
-
+        for material, quantity in self.epic_materials:
+            mat_name = material.name
+            by_material = self._fill_flows_dict(period_of_analysis, materials_list=[[material, quantity]])
+            if mat_name not in result['by_material']:
+                by_material.update([('quantity', quantity), ('material_object', material), ('material_name', mat_name)])
             else:
-                _temp_results = self._fill_flows_dict(period_of_analysis, materials_list=[material])
-
-                # This will merge together any materials that have the same name
-                result['by_material'][material[0].name] = \
-                    sum_numerical_dictionary_values(result['by_material'][material[0].name], _temp_results)
-                result['by_material'][material[0].name]['quantity'] += material[1]
-                if result['by_material'][material[0].name]['material_object'].material_id == material[0].material_id:
+                # Merge together any materials that have the same name
+                by_material = sum_numerical_dictionary_values(result['by_material'][mat_name], by_material)
+                by_material['quantity'] += quantity
+                if by_material['material_object'].material_id == material.material_id:
                     pass
                 else:
                     raise ValueError("Mismatched material name in 'by_material' calculation")
+            result['by_material'][mat_name] = by_material
         return result
 
     def print_report(self, initial_flow=True, assembly_part_details=True, print_as_str=False):
@@ -2424,12 +2461,22 @@ class EPiCAssembly:
         """
         material_list = []
         for num, arg in enumerate(args):  # Make a list of all the valid materials and material quantities
+
+            # Handle list values passed from component. Only use first list item
+            #todo develop cleaner way to deal with list items, rather than using try except
+            try:
+                arg = arg[0]
+            except:
+                pass
+
+            # todo changing the NickName with Rhino 8 will break the component. Future fix.
             if (num + 2) % 2 == 0:
-                if arg and 'functional_unit' in dir(
-                        arg):  # Check if material has the attribute (functional unit). Will return False for a number or string
+                if arg and 'functional_unit' in dir(arg):  # Check if material has the attribute (functional unit). Will return False for a number or string
                     material = [arg]
-                    component.Params.Input[7+num].NickName = "Material: " + str(arg.name)
-                    component.Params.Input[8+num].NickName = "({0} / {1})".format(arg.functional_unit, units)
+                    component.Params.Input[7+num].NickName = component.Params.Input[7+num].Name \
+                        = "Material: " + str(arg.name)
+                    component.Params.Input[8+num].NickName = component.Params.Input[8+num].Name \
+                        = "({0} / {1})".format(arg.functional_unit, units)
                 else:
                     material = None
                     component.Params.Input[7 + num].NickName = "Material " + str(num/2 + 1)
@@ -2439,7 +2486,6 @@ class EPiCAssembly:
                 if arg and material:
                     material_list.append([material, arg])
         return material_list
-
 
 class EPiCAnalysis:
     """
@@ -2467,9 +2513,10 @@ class EPiCAnalysis:
 
         # Set attributes and variables
         self.component_type = 'EPiCAnalysis'
-        self.name = name
+        self.name = remove_commas_and_flatten_list_for_csv_export(name) if name else 'EPiCAnalysis'
+        self.comments = remove_commas_and_flatten_list_for_csv_export(comments) if comments else ''
         self.period_of_analysis = period_of_analysis
-        self.comments = comments
+
         list_of_assembly_names = []
 
         # Code to enable built_assets for built_assets / comparison of multiple assemblies.
@@ -2684,6 +2731,9 @@ class EPiCAnalysis:
         results_list = []
         output_keys = []
 
+        if not analysis_type:
+            analysis_type = 'total'
+
         for flow in DEFINED_FLOWS.keys():
             results_list.append(None)
             for flow_type in self.flows.keys():
@@ -2820,6 +2870,36 @@ class EPiCDatabase:
                 with open(local_directory + os.sep + r'EPiC Grasshopper' + os.sep + PICKLE_DB, 'rb') as f:
                     self.database = cPickle.load(f)
 
+        # Load set of categories in the database
+
+        self.categories = EPiCDatabase.get_categories(self.database)
+        self.dict_of_categories = EPiCDatabase.get_dict_of_categories(self.database)
+        self.dict_of_ids_and_names = {key: self.database[key]['name'] for key in self.database.keys()}
+        self.dict_of_legacy_names = {key: self.database[key]['Legacy_names'] for key in self.database.keys()}
+
+    @staticmethod
+    def get_categories(database):
+        """
+        Returns a set containing all categories in the database
+        """
+        return {x['Category'] for x in database.values() if x['Latest_Version']}
+
+    @staticmethod
+    def get_dict_of_categories(database):
+        """
+        Returns a dictionary of categories, which contains a list of mat ids [(mat_id, mat_name), (... , ...)]
+        """
+        # if the class instance already has a set of categories, use that, otherwise create a set
+
+        if hasattr(database, 'categories'):
+            categories = database.categories
+
+        else:
+            categories = EPiCDatabase.get_categories(database)
+
+        return {category: dict([(id, EPiCMaterial._concatenate_mat_name_func_unit(mat['name'], mat['Functional Unit']))
+                for id, mat in database.items() if mat['Category'] == category]) for category in categories}
+
     def load_custom_database(self, file_path, file_name):
         """
         Load a custom database file
@@ -2831,33 +2911,70 @@ class EPiCDatabase:
             try:
                 with open(file_path + r'//' + file_name, 'rb') as f:
                     self.custom_database = cPickle.load(f)
+
+                    # Overwrite categories
+                    self.categories = EPiCDatabase.get_categories(self.custom_database)
+                    self.dict_of_categories = EPiCDatabase.get_dict_of_categories(
+                        self.custom_database)
+                    self.dict_of_ids_and_names = {key: self.custom_database[key]['name']
+                                                for key in self.custom_database.keys()}
+                    self.dict_of_legacy_names = self.dict_of_ids_and_names
             except:
                 self.custom_database = 'Error'
                 raise (RuntimeError("Couldn't load database from: " + file_path + r'//' + file_name))
 
-    def query(self, material_name, material_attribute=None):
+    def _query_for_name_or_old_mat_id(self, lookup_item):
+        """
+        Lookup material based on name, or legacy name.
+        :param lookup_item: Name of the material to lookup
+        :return: material ID as string
+        """
+        lookup_item = str(lookup_item)
+
+        # Remove decoration from material name (if it exists)
+        if '|' in lookup_item:
+            lookup_item = EPiCMaterial.remove_func_unit_from_mat_name(lookup_item)
+
+        # Search in the list of material names followed by a search of legacy names
+        if lookup_item in self.dict_of_ids_and_names.values():
+            return [key for key, value in self.dict_of_ids_and_names.items() if lookup_item == value][0]
+        elif lookup_item in self.dict_of_legacy_names.values():
+            return [key for key, value in self.dict_of_legacy_names.items() if lookup_item == value][0]
+        return None
+
+    def query(self, material_id, material_attributes=None):
         """
         Query the EPiC Database using a material name & optional attribute
-        :param material_name: Name of the material to return
-        :param material_attribute: Name of the attribute to return (e.g DOI, Functional Unit)
+        :param material_id: ID of the material S-String, I-Integer Region(SS)Year(IIII)Cat(SS)Material(III)Variation(II)
+        :param material_attributes: Name of the attribute to return (e.g DOI, Functional Unit), or list of attributes
         :return: material dictionary OR material attribute (if specified)
         """
         query = None
-
         # Use the default database unless a custom database has been provided
         database = self.database if not self.custom_database else self.custom_database
 
-        if material_attribute is None:
+        try:
+            _ = database[material_id]
+        except KeyError:
+            material_id = self._query_for_name_or_old_mat_id(material_id)
+
+        if material_attributes is None:
             try:
-                query = database[material_name]
+                query = database[material_id]
             except KeyError:
                 raise TypeError('Material not found')
 
         else:
-            if isinstance(material_attribute, list):
-                query = [database[material_name][mat] for mat in material_attribute]
-            else:
-                query = database[material_name][material_attribute]
+            try:
+                if isinstance(material_attributes, list):
+                    # if an attribute doesn't exist, return None for that list item
+                    query = [database[material_id][attribute] if attribute in database[material_id]
+                             else 'None'
+                             for attribute in material_attributes]
+                else:
+                    query = database[material_id][material_attributes]
+            except KeyError:
+                raise TypeError('Material or material attribute not found')
 
         # Return None if there are no results
         if not isinstance(query, list):

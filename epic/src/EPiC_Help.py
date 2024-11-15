@@ -43,7 +43,7 @@ class EPiCHelp(component):
 
         # Component and version information
         __author__ = epic.__author__
-        __version__ = "1.01"
+        __version__ = "1.02"
         if __version__ == epic.__version__:
             self.Message = epic.__message__
         else:

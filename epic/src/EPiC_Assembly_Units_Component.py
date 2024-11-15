@@ -69,22 +69,63 @@ geometry_warning = "Brep/surface/line input detected, please input point/unit ge
 
 class EPiCAssemblyVolumetricComponent(component):
 
-    def RunScript(self, input_assembly_name, input_assembly_category, input_assembly_comments, input_selected_geometry,
-                  input_service_life_override, input_wastage_override, _input_null, *args):
+    def RunScript(self,
+            input_assembly_name,
+            input_assembly_category,
+            input_assembly_comments,
+            input_selected_geometry,
+            input_service_life_override,
+            input_wastage_override,
+            _null,
+            material_01,
+            material_01_qty,
+            material_02,
+            material_02_qty,
+            material_03,
+            material_03_qty,
+            material_04,
+            material_04_qty,
+            material_05,
+            material_05_qty,
+            material_06,
+            material_06_qty,
+            material_07,
+            material_07_qty,
+            material_08,
+            material_08_qty,
+            material_09,
+            material_09_qty,
+            material_10,
+            material_10_qty):
 
         # Component and version information
         __author__ = epic.__author__
-        __version__ = "1.01"
+        __version__ = "1.02"
         if __version__ == epic.__version__:
-            self.Message = epic.__message__
+            ghenv.Component.Message = epic.__message__
         else:
-            self.Message = epic.version_mismatch(__version__)
-            self.AddRuntimeMessage(RML.Remark, self.Message)
-        self.Name = component_name
-        self.NickName = component_name
+            ghenv.Component.Message = epic.version_mismatch(__version__)
+            ghenv.Component.AddRuntimeMessage(RML.Remark, ghenv.Component.Message)
+        ghenv.Component.Name = component_name
+        ghenv.Component.NickName = component_name
+
+        # Added for compatability with Rhino 8.
+        # Get material variables from locals(), so it is possible to create inputs dynamically. Check for up to 20 materials.
+        material_list = []
+        for num in range(1, 21):
+            if num < 10:
+                num = str(0) + str(num)
+            else:
+                num = str(num)
+            _ = 'material_' + num
+            if _ and _ + '_qty' in locals():
+                material_list.append(locals()[_])
+                material_list.append(locals()[_ + '_qty'])
+            else:
+                break
 
         # Sort the material inputs and quantities
-        material_list = epic.EPiCAssembly.create_list_of_input_materials_and_qty(self, units, args)
+        material_list = epic.EPiCAssembly.create_list_of_input_materials_and_qty(ghenv.Component, units, material_list)
 
         # Create an EPiCAssembly class object
         try:
@@ -92,16 +133,16 @@ class EPiCAssemblyVolumetricComponent(component):
                                          input_wastage_override, input_assembly_comments, material_list,
                                          assembly_units=units, category=input_assembly_category)
         except TypeError:
-            self.AddRuntimeMessage(RML.Warning, geometry_warning)
+            ghenv.Component.AddRuntimeMessage(RML.Warning, geometry_warning)
             return [geometry_warning]*5
 
         # Test to see if geometry is connected to the component
         if not input_selected_geometry:
-            self.AddRuntimeMessage(RML.Warning, "No geometry is connected to the assembly")
+            ghenv.Component.AddRuntimeMessage(RML.Warning, "No geometry is connected to the assembly")
 
         # Test to see if any material inputs exist
         if len(material_list) < 1:
-            self.AddRuntimeMessage(RML.Warning, "No input EPiC_Material inputs or material quantities have been found ")
+            ghenv.Component.AddRuntimeMessage(RML.Warning, "No input EPiC_Material inputs or material quantities have been found ")
 
         # Calculate the environmental flows for the assembly
         assembly.calculate_flows()
@@ -109,7 +150,7 @@ class EPiCAssemblyVolumetricComponent(component):
         # Specify the component outputs
         output_initial_energy = assembly.flows['initial']['energy']
         output_initial_water = assembly.flows['initial']['water']
-        initial_ghg = assembly.flows['initial']['ghg']
+        output_initial_ghg = assembly.flows['initial']['ghg']
 
         # Return all component outputs
-        return assembly, None, output_initial_energy, output_initial_water, initial_ghg, None, assembly.output_geometry
+        return assembly, None, output_initial_energy, output_initial_water, output_initial_ghg, None, assembly.output_geometry

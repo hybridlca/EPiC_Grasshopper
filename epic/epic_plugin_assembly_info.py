@@ -5,10 +5,10 @@ import GhPython
 import System
 
 __author__ = "André Stephan & Fabian Prideaux"
-__version__ = "1.00"
+__version__ = "1.02"
 __date__ = date.today().strftime("%B %d, %Y")
 __message__ = 'EPiC Plugin ' + __version__ + '\n' + __date__
-epic_version = 'AU2019'
+epic_version = 'AU2024'
 
 
 class AssemblyInfo(GhPython.Assemblies.PythonAssemblyInfo):

@@ -87,7 +87,7 @@ Select a material from the EPiC Database
 """
 
 import webbrowser
-
+from Grasshopper.Kernel.Special import GH_NumberSlider
 from Grasshopper import Folders
 from Grasshopper.Kernel import GH_RuntimeMessageLevel as RML
 from ghpythonlib.componentbase import executingcomponent as component
@@ -101,65 +101,96 @@ epic = reload(epic)
 
 class EPiCMaterialComponent(component):
 
-    def RunScript(self, connect_button, material_category, selected_material, comments, _null, wastage, service_life,
+    def RunScript(self,
+                  connect_button,
+                  material_category,
+                  material_id,
+                  comments,
+                  _null,
+                  wastage,
+                  service_life,
                   _null2,
-                  energy_reduction, water_reduction, ghg_reduction, _null3, epic_help):
+                  energy_reduction,
+                  water_reduction,
+                  ghg_reduction,
+                  _null3,
+                  epic_help):
 
         # Component and version information
         __author__ = epic.__author__
-        __version__ = "1.01"
+        __version__ = "1.02"
         if __version__ == epic.__version__:
-            self.Message = epic.__message__
+            ghenv.Component.Message = epic.__message__
         else:
-            self.Message = epic.version_mismatch(__version__)
-            self.AddRuntimeMessage(RML.Remark, self.Message)
-        self.Name = "EPiC Material"
-        self.NickName = "EPiC Material"
+            ghenv.Component.Message = epic.version_mismatch(__version__)
+            ghenv.Component.AddRuntimeMessage(RML.Remark, ghenv.Component.Message)
+        ghenv.Component.Name = "EPiC Material"
+        ghenv.Component.NickName = "EPiC Material"
 
         # Setup a global sticky variable for the component, ensuring sliders component are not continuously generated.
         component_id = ghenv.Component.InstanceGuid
         if component_id not in st:
-            st[component_id] = selected_material
+            st[component_id] = material_id
 
         # Open the EPiC Database or EPiC Grasshopper Bugs / Suggestions Google Form
         if epic_help:
             webbrowser.open("https://bit.ly/EPiC_Database", new=1)
 
-        # Specify the directory where the EPiC Database is stored (usually the grasshopper library folder)
-        epic_db = epic.EPiCDatabase(Folders.DefaultAssemblyFolder)
+        # Specify the directory where the EPiC Database is stored (usually the grasshopper library folder), only load once into sticky dictionary
+        if 'epic_db' not in st:
+            st['epic_db'] = epic.EPiCDatabase(Folders.DefaultAssemblyFolder)
+        epic_db = st['epic_db']
+
+        if material_category:
+            if isinstance(material_category, list):
+                material_category = material_category[0]
+            if ':' in material_category:
+                material_category = material_category.split(': ')[1]
 
         # Generate a material and category list when button is turned on
         if connect_button:
-            if not selected_material or not material_category:
-                epic.EPiCMaterial.generate_material_and_category_dropdown_list(self, ghenv, epic_db)
+            if not material_id or not material_category:
+                if material_category:
+                    epic.EPiCMaterial.generate_material_and_category_dropdown_list(ghenv.Component, ghenv, epic_db,
+                                                                                   category=material_category)
+                else:
+                    epic.EPiCMaterial.generate_material_and_category_dropdown_list(ghenv.Component, ghenv, epic_db)
                 # Reset the global sticky value
                 st[component_id] = None
 
         # Make sure that a material category & material have been selected
-        if selected_material and material_category:
-            selected_material = epic.EPiCMaterial.remove_func_unit_from_mat_name(selected_material)
+        if material_id and material_category:
+
+            # Flatten material category list and remove number from start of string
+
             # Test if the selected material is in the selected category
-            if epic_db.query(selected_material, 'Category') not in material_category[0]:
-                # Get a list of objects in the grasshopper document, so that material list object can be recreated
-                ghObjects = self.OnPingDocument().Objects
-                epic.EPiCMaterial.recreate_material_list(epic_db, ghObjects, material_category, self.Params)
+            if material_id not in epic_db.dict_of_categories[material_category]:
 
+                # Test if material is in old database
+                legacy_material = epic_db._query_for_name_or_old_mat_id(material_id)
+                if legacy_material:
+                    material_id = legacy_material
+                    ghObject = ghenv.Component.Params.Input[2].Sources[0]
+                    epic.EPiCMaterial.recreate_material_list(epic_db, ghObject, material_category, ghenv.Component,
+                                                             set_material=material_id)
+                else:
+                    ghObject = ghenv.Component.Params.Input[2].Sources[0]
+                    epic.EPiCMaterial.recreate_material_list(epic_db, ghObject, material_category, ghenv.Component)
             # Load the material values from the database
-            energy, water, ghg, functional_unit, name, doi, category, material_ID, density = \
-                epic_db.query(selected_material, ['Energy', 'Water', 'GHG', 'Functional Unit', 'name',
-                                                  'DOI', 'Category', 'ID', 'Density'])
-
-            process_shares = {flow: epic_db.query(selected_material, 'hybrid_process_proportion_' + str(flow)) for
+            energy, water, ghg, functional_unit, name, doi, category, density = \
+                epic_db.query(material_id, ['Energy', 'Water', 'GHG', 'Functional Unit', 'name',
+                                            'DOI', 'Category', 'Density'])
+            process_shares = {flow: epic_db.query(material_id, 'hybrid_process_proportion_' + str(flow)) for
                               flow in epic.DEFINED_FLOWS.keys()}
 
             # Only run this code if the material selection has changed. Uses global sticky to track material choice.
-            if selected_material != st[component_id]:
+            if material_id != st[component_id]:
                 # Fetch the wastage/service life coefficient from the EPiCDB (if exists)
                 try:
                     # In db, wastage coefficient of 1 = 0%, 1.1 = 10%. Scale accordingly
                     # In db, service life of -1 = no service life.
-                    epic_wastage = (epic_db.query(selected_material, 'Wastage') - 1) * 100
-                    epic_service_life = (epic_db.query(selected_material, 'Service Life'))
+                    epic_wastage = (epic_db.query(material_id, 'Wastage') - 1) * 100
+                    epic_service_life = (epic_db.query(material_id, 'Service Life'))
                     if epic_service_life == -1 or not epic_service_life:
                         epic_service_life = 0
                 except TypeError:
@@ -168,16 +199,17 @@ class EPiCMaterialComponent(component):
 
                 # Generate a slider input and set wastage/service life. If one already exists, change the value to new material.
                 for input in [(5, epic_wastage), (6, epic_service_life)]:
-                    if not self.Params.Input[input[0]].Sources:
-                        epic.EPiCMaterial.generate_slider_input(self, ghenv, input[1], input[0])
+                    if not ghenv.Component.Params.Input[input[0]].Sources:
+                        epic.EPiCMaterial.generate_slider_input(ghenv.Component, None, input[1], input[0])
                     else:
-                        for obj in self.OnPingDocument().Objects:
-                            if obj.InstanceGuid == self.Params.Input[input[0]].Sources[0].InstanceGuid:
-                                self.OnPingDocument().ScheduleSolution(5, ScheduleCallback(obj, input[1]))
-                                break
+                        list_object = ghenv.Component.Params.Input[input[0]].Sources[0]
+                        # Only change value if input is a number slider, otherwise leave untouched
+                        if isinstance(list_object, GH_NumberSlider):
+                            ghenv.Component.OnPingDocument().ScheduleSolution(5,
+                                                                              ScheduleCallback(list_object, input[1]))
 
                 # Reset global sticky value to the current material selection choice
-                st[component_id] = selected_material
+                st[component_id] = material_id
 
             # Include reduction factor for materials
             if water and ghg and energy:
@@ -190,23 +222,26 @@ class EPiCMaterialComponent(component):
             # Create the EPiCMaterial class object
             output_epic_material = epic.EPiCMaterial(name=name, water=water, ghg=ghg, energy=energy,
                                                      functional_unit=functional_unit, doi=doi, category=category,
-                                                     material_id=material_ID, wastage=wastage,
-                                                     service_life=service_life, comments=comments, density=density,
+                                                     material_id=material_id, wastage=wastage,
+                                                     service_life=service_life,
+                                                     comments=comments,
+                                                     density=density,
                                                      process_shares=process_shares)
 
             # Component outputs
             return output_epic_material, None, output_epic_material.energy, output_epic_material.water, \
-                   output_epic_material.ghg, None, output_epic_material.doi, output_epic_material.density, \
-                   output_epic_material.functional_unit, wastage, service_life, epic.DISCLAIMER
+                output_epic_material.ghg, None, output_epic_material.doi, output_epic_material.density, \
+                output_epic_material.functional_unit, wastage, service_life, epic.DISCLAIMER
 
         # Raise error when there is no material and category selected
         else:
             warning = 'Connect a button to the first input, and activate to generate a material & category list'
-            self.AddRuntimeMessage(RML.Warning, warning)
+            ghenv.Component.AddRuntimeMessage(RML.Warning, warning)
             return [warning] * 11 + [epic.DISCLAIMER]
 
-def ScheduleCallback(obj, val):
-    if val > 100:
-        obj.Slider.Maximum = val
-    obj.Slider.Value = val
-    obj.ExpireSolution(True)
+
+def ScheduleCallback(obj, val=0):
+    if val:
+        if val > 100:
+            obj.Slider.Maximum = val
+        obj.Slider.Value = val
